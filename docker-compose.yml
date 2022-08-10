@@ -32,23 +32,9 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
     volumes:
       - redis:/data
-
-  # whoami:
-  #   image: traefik/whoami
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.whoami.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/whoami/`))"
-  #     - "traefik.http.routers.whoami.entrypoints=web"    
-  #     - "traefik.http.routers.whoami.middlewares=xheaders@docker"    
-  #     - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Proto=https"
-  #     - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Port=443"
-  #   depends_on: 
-  #     - traefik
-  #   networks:
-  #     - external_network
-
+  
   traefik:
-    build: ./traefik
+    image: traefik:v2.8.1
     container_name: traefik
     networks:
       - external_network
@@ -56,7 +42,19 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"
+    command:
+      - "--log.level=INFO"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      #Point to Balena docker socket
+      - "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
+      - "--certificatesResolvers.letsencrypt.acme.email=dsevastianov@gmail.com"
+      - "--certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesResolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
+      - "--certificatesResolvers.letsencrypt.acme.httpChallenge.entrypoint=web"
+
     labels:
       # So that Traefik can listen to the Docker events
       - "io.balena.features.balena-socket=1"
@@ -69,9 +67,9 @@ services:
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.port=443"
-
+    depends_on:
+      - web
+      - streaming
     volumes:
       - letsencrypt:/letsencrypt
   web:
@@ -89,7 +87,6 @@ services:
     depends_on:
       - db
       - redis
-      - traefik
       # - es
     labels:
       - "traefik.enable=true"
@@ -131,7 +128,6 @@ services:
     depends_on:
       - db
       - redis
-      - traefik
 
   sidekiq:
     build: .
@@ -149,17 +145,3 @@ services:
       - mastodon:/public/system
     healthcheck:
       test: ['CMD-SHELL', "ps aux | grep '[s]idekiq\ 6' || false"]
-
-  tor:
-    image: sirboops/tor
-    networks:
-       - external_network
-       - internal_network
-  
-  privoxy:
-    image: sirboops/privoxy
-    volumes:
-      - priv-config:/opt/config
-    networks:
-      - external_network
-      - internal_network
