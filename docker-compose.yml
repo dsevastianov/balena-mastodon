@@ -1,0 +1,165 @@
+version: '2.1'
+volumes:
+  postgres14:
+  mastodon:
+  redis:
+  letsencrypt:
+  priv-config:
+networks:
+  external_network:
+  internal_network:
+    internal: true
+services:
+  db:
+    restart: always
+    build: ./db
+    shm_size: 256mb
+    networks:
+      - internal_network
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres']
+    volumes:
+      - postgres14:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+
+  redis:
+    restart: always
+    image: redis:6-alpine
+    networks:
+      - internal_network
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+    volumes:
+      - redis:/data
+
+  # whoami:
+  #   image: traefik/whoami
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.whoami.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/whoami/`))"
+  #     - "traefik.http.routers.whoami.entrypoints=web"    
+  #     - "traefik.http.routers.whoami.middlewares=xheaders@docker"    
+  #     - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Proto=https"
+  #     - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Port=443"
+  #   depends_on: 
+  #     - traefik
+  #   networks:
+  #     - external_network
+
+  traefik:
+    build: ./traefik
+    container_name: traefik
+    networks:
+      - external_network
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    labels:
+      # So that Traefik can listen to the Docker events
+      - "io.balena.features.balena-socket=1"
+      - "traefik.enable=true"
+
+      # # # HTTPS Redirect
+      - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Port=443"
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.port=443"
+
+    volumes:
+      - letsencrypt:/letsencrypt
+  web:
+    container_name: mastodon-web
+    build: .
+    restart: always
+    env_file: .env.production
+    command: bash -c "rm -f /mastodon/tmp/pids/server.pid; bundle exec rake db:setup; bundle exec rails s -p 3000" #TODO: ew, figure out db setup
+    networks:
+      - external_network
+      - internal_network
+    healthcheck:
+      # prettier-ignore
+      test: ['CMD-SHELL', 'wget -q --spider --proxy=off localhost:3000/health || exit 1']
+    depends_on:
+      - db
+      - redis
+      - traefik
+      # - es
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.mastodon-web.loadbalancer.server.port=3000"
+      - "traefik.http.routers.mastodon-web.rule=Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`)"
+      - "traefik.http.routers.mastodon-web.entrypoints=websecure"
+      - "traefik.http.routers.mastodon-web.tls.certresolver=letsencrypt"
+
+      - "traefik.http.routers.mastodon-web-http.middlewares=xheaders@docker"  
+      - "traefik.http.routers.mastodon-web-http.rule=Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`)"
+      - "traefik.http.routers.mastodon-web-http.entrypoints=web"
+    volumes:
+      - mastodon:/public/system
+
+  streaming:
+    build: .
+    image: tootsuite/mastodon
+    restart: always
+    env_file: .env.production
+    command: node ./streaming
+    networks:
+      - external_network
+      - internal_network
+    healthcheck:
+      # prettier-ignore
+      test: ['CMD-SHELL', 'wget -q --spider --proxy=off localhost:4000/api/v1/streaming/health || exit 1']
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.mastodon-streaming.loadbalancer.server.port=4000"
+      - "traefik.http.routers.mastodon-streaming.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
+      - "traefik.http.routers.mastodon-streaming.entrypoints=websecure"
+      - "traefik.http.routers.mastodon-streaming.tls.certresolver=letsencrypt"
+
+      - "traefik.http.routers.mastodon-streaming-http.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
+      - "traefik.http.routers.mastodon-streaming-http.entrypoints=web"
+      - "traefik.http.routers.mastodon-streaming-http.middlewares=xheaders@docker"  
+
+
+    depends_on:
+      - db
+      - redis
+      - traefik
+
+  sidekiq:
+    build: .
+    image: tootsuite/mastodon
+    restart: always
+    env_file: .env.production
+    command: bundle exec sidekiq
+    depends_on:
+      - db
+      - redis
+    networks:
+      - external_network
+      - internal_network
+    volumes:
+      - mastodon:/public/system
+    healthcheck:
+      test: ['CMD-SHELL', "ps aux | grep '[s]idekiq\ 6' || false"]
+
+  tor:
+    image: sirboops/tor
+    networks:
+       - external_network
+       - internal_network
+  
+  privoxy:
+    image: sirboops/privoxy
+    volumes:
+      - priv-config:/opt/config
+    networks:
+      - external_network
+      - internal_network
