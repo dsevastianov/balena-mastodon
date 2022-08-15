@@ -4,7 +4,7 @@ volumes:
   mastodon:
   redis:
   letsencrypt:
-  elasticsearch:
+  # elasticsearch:
 networks:
   external_network:
   internal_network:
@@ -33,36 +33,36 @@ services:
     volumes:
       - redis:/data
   
-  es:
-    restart: always
-    image: elasticsearch:7.17.5
-    environment:
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
-      - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
-      - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
-      - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
-      - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
-      - "ES_SETTING_XPACK_ML_ENABLED=false"
-      - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
-      - "ES_SETTING_CLUSTER_NAME=es-mastodon"
-      - "ES_SETTING_DISCOVERY_TYPE=single-node"
-      - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
-    networks:
-       - internal_network
-    healthcheck:
-       test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
-    volumes:
-       - elasticsearch:/usr/share/elasticsearch/data
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
-    ports:
-      - '127.0.0.1:9200:9200'
-      - '127.0.0.1:9300:9300'
+  # es:
+  #   restart: always
+  #   image: elasticsearch:7.17.5
+  #   environment:
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
+  #     - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
+  #     - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
+  #     - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
+  #     - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
+  #     - "ES_SETTING_XPACK_ML_ENABLED=false"
+  #     - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
+  #     - "ES_SETTING_CLUSTER_NAME=es-mastodon"
+  #     - "ES_SETTING_DISCOVERY_TYPE=single-node"
+  #     - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
+  #   networks:
+  #      - internal_network
+  #   healthcheck:
+  #      test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
+  #   volumes:
+  #      - elasticsearch:/usr/share/elasticsearch/data
+  #   ulimits:
+  #     memlock:
+  #       soft: -1
+  #       hard: -1
+  #     nofile:
+  #       soft: 65536
+  #       hard: 65536
+  #   ports:
+  #     - '127.0.0.1:9200:9200'
+  #     - '127.0.0.1:9300:9300'
   
   traefik:
     image: traefik:v2.8.1
@@ -120,7 +120,7 @@ services:
     depends_on:
       - db
       - redis
-      - es
+      #- es
     labels:
       - "traefik.enable=true"      
       - "traefik.http.services.web-https.loadbalancer.server.port=3000"
@@ -140,6 +140,9 @@ services:
     restart: always
     env_file: .env.production
     command: node ./streaming
+    depends_on:
+      - db
+      - redis
     networks:
       - external_network
       - internal_network
@@ -156,9 +159,6 @@ services:
       - "traefik.http.routers.streaming-http.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
       - "traefik.http.routers.streaming-http.entrypoints=web"
       - "traefik.http.routers.streaming-http.middlewares=xheaders@docker"  
-    depends_on:
-      - db
-      - redis
 
   sidekiq:
     build: .
@@ -169,6 +169,7 @@ services:
     depends_on:
       - db
       - redis
+      - web
     networks:
       - external_network
       - internal_network
