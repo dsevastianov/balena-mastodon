@@ -10,7 +10,7 @@ For those who wants to have more control, Balena cloud provides an attractive al
 
 ## How
 
-1. Register on Balena-cloud.com
+1. Register on [Balena-cloud.com](https://dashboard.balena-cloud.com/login)
 2. Click on "Getting started" for step-by-step walkgthrough of onboarding your device with Balena. You can go ahead and use Balena-mastodon project right away to push Mastodon on you device or play around with our Hello world project to get comfortable. You'll need a few more things to get started with Mastodon on Balena:
    * Preferred mail service for handling registrations, password resets, etc. [Sendgrid](https://app.sendgrid.com/), [Mailchimp](https://mailchimp.com/) or just GMail ([here](https://kinsta.com/blog/gmail-smtp-server/) is a good walkthrough) - any one will work, and the free option is fine for most usecases
    * If you prefer to have your own domain, make sure it's pointing to the IP of your device. Typically you will need to do redirect HTTPS on port 443 in your router to hit your device. 

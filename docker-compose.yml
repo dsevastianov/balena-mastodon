@@ -80,8 +80,8 @@ services:
       - "--entrypoints.websecure.address=:443"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      #Point to Balena docker socket
-      - "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
+      #Point to Balena docker socket, comment out to run on local docker
+      #- "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
       - "--certificatesResolvers.letsencrypt.acme.email=dsevastianov@gmail.com"
       - "--certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--certificatesResolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
