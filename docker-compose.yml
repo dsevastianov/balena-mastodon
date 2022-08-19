@@ -4,7 +4,7 @@ volumes:
   mastodon:
   redis:
   letsencrypt:
-  # elasticsearch:
+  elasticsearch:
 networks:
   external_network:
   internal_network:
@@ -32,37 +32,37 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
     volumes:
       - redis:/data
-  
-  # es:
-  #   restart: always
-  #   image: elasticsearch:7.17.5
-  #   environment:
-  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
-  #     - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
-  #     - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
-  #     - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
-  #     - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
-  #     - "ES_SETTING_XPACK_ML_ENABLED=false"
-  #     - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
-  #     - "ES_SETTING_CLUSTER_NAME=es-mastodon"
-  #     - "ES_SETTING_DISCOVERY_TYPE=single-node"
-  #     - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
-  #   networks:
-  #      - internal_network
-  #   healthcheck:
-  #      test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
-  #   volumes:
-  #      - elasticsearch:/usr/share/elasticsearch/data
-  #   ulimits:
-  #     memlock:
-  #       soft: -1
-  #       hard: -1
-  #     nofile:
-  #       soft: 65536
-  #       hard: 65536
-  #   ports:
-  #     - '127.0.0.1:9200:9200'
-  #     - '127.0.0.1:9300:9300'
+ 
+  es:
+    restart: always
+    image: elasticsearch:7.17.5
+    environment:
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
+      - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
+      - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
+      - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
+      - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
+      - "ES_SETTING_XPACK_ML_ENABLED=false"
+      - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
+      - "ES_SETTING_CLUSTER_NAME=es-mastodon"
+      - "ES_SETTING_DISCOVERY_TYPE=single-node"
+      - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
+    networks:
+       - internal_network
+    healthcheck:
+       test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
+    volumes:
+       - elasticsearch:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - '127.0.0.1:9200:9200'
+      - '127.0.0.1:9300:9300'
   
   traefik:
     image: traefik:v2.8.1
@@ -92,25 +92,31 @@ services:
       - "io.balena.features.balena-socket=1"
       - "traefik.enable=true"
 
-      # # # HTTPS Redirect
       # Proxy on Balena cloud strips X-Forward-* headers, adding them in middleware
       - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Proto=https"
       - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Port=443"
+      # # # HTTPS Redirect
       - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      #Cache
+      - "traefik.http.middlewares.test-http-cache.plugin.httpCache.maxTtl=600"
     depends_on:
       - web
       - streaming
     volumes:
       - letsencrypt:/letsencrypt
+
   web:
     container_name: mastodon-web
     build: .
     restart: always
     env_file: .env.production
     command: bash -c "rm -f /mastodon/tmp/pids/server.pid; bundle exec rake db:setup; bundle exec rails s -p 3000" #TODO: ew, figure out db setup
+    environment:
+      - WEB_CONCURRENCY=1
+      - MAX_THREADS=5
     networks:
       - external_network
       - internal_network
@@ -120,7 +126,7 @@ services:
     depends_on:
       - db
       - redis
-      #- es
+      - es
     labels:
       - "traefik.enable=true"      
       - "traefik.http.services.web-https.loadbalancer.server.port=3000"
@@ -132,7 +138,26 @@ services:
       - "traefik.http.routers.web-http.rule=Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`)"
       - "traefik.http.routers.web-http.entrypoints=web"
     volumes:
-      - mastodon:/public/system
+      - mastodon:/mastodon/public/system
+
+  sidekiq:
+    build: .
+    image: tootsuite/mastodon
+    restart: always
+    env_file: .env.production
+    command: bundle exec sidekiq
+    depends_on:
+      - db
+      - redis
+      - web
+    networks:
+      - external_network
+      - internal_network
+    volumes:
+      - mastodon:/mastodon/public/system
+    healthcheck:
+      test: ['CMD-SHELL', "ps aux | grep '[s]idekiq\ 6' || false"]
+
 
   streaming:
     build: .
@@ -159,21 +184,3 @@ services:
       - "traefik.http.routers.streaming-http.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
       - "traefik.http.routers.streaming-http.entrypoints=web"
       - "traefik.http.routers.streaming-http.middlewares=xheaders@docker"  
-
-  sidekiq:
-    build: .
-    image: tootsuite/mastodon
-    restart: always
-    env_file: .env.production
-    command: bundle exec sidekiq
-    depends_on:
-      - db
-      - redis
-      - web
-    networks:
-      - external_network
-      - internal_network
-    volumes:
-      - mastodon:/public/system
-    healthcheck:
-      test: ['CMD-SHELL', "ps aux | grep '[s]idekiq\ 6' || false"]
