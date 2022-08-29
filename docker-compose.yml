@@ -11,8 +11,8 @@ networks:
     internal: true
 services:
   db:
+    image: postgres:14-alpine
     restart: always
-    build: ./db
     shm_size: 256mb
     networks:
       - internal_network
@@ -33,36 +33,36 @@ services:
     volumes:
       - redis:/data
  
-  es:
-    restart: always
-    image: elasticsearch:7.17.5
-    environment:
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
-      - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
-      - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
-      - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
-      - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
-      - "ES_SETTING_XPACK_ML_ENABLED=false"
-      - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
-      - "ES_SETTING_CLUSTER_NAME=es-mastodon"
-      - "ES_SETTING_DISCOVERY_TYPE=single-node"
-      - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
-    networks:
-       - internal_network
-    healthcheck:
-       test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
-    volumes:
-       - elasticsearch:/usr/share/elasticsearch/data
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
-    ports:
-      - '127.0.0.1:9200:9200'
-      - '127.0.0.1:9300:9300'
+  # es:
+  #   restart: always
+  #   image: elasticsearch:7.17.5
+  #   environment:
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.enforce.bootstrap.checks=true"
+  #     - "ES_SETTING_XPACK_LICENSE_SELF__GENERATED_TYPE=basic"
+  #     - "ES_SETTING_XPACK_SECURITY_ENABLED=false"
+  #     - "ES_SETTING_XPACK_WATCHER_ENABLED=false"
+  #     - "ES_SETTING_XPACK_GRAPH_ENABLED=false"
+  #     - "ES_SETTING_XPACK_ML_ENABLED=false"
+  #     - "ES_SETTING_BOOTSTRAP_MEMORY__LOCK=true"
+  #     - "ES_SETTING_CLUSTER_NAME=es-mastodon"
+  #     - "ES_SETTING_DISCOVERY_TYPE=single-node"
+  #     - "ES_SETTING_THREAD__POOL_WRITE_QUEUE__SIZE=1000"
+  #   networks:
+  #      - internal_network
+  #   healthcheck:
+  #      test: ["CMD-SHELL", "curl --silent --fail localhost:9200/_cluster/health || exit 1"]
+  #   volumes:
+  #      - elasticsearch:/usr/share/elasticsearch/data
+  #   ulimits:
+  #     memlock:
+  #       soft: -1
+  #       hard: -1
+  #     nofile:
+  #       soft: 65536
+  #       hard: 65536
+  #   ports:
+  #     - '127.0.0.1:9200:9200'
+  #     - '127.0.0.1:9300:9300'
   
   traefik:
     image: traefik:v2.8.1
@@ -81,7 +81,7 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       #Point to Balena docker socket, comment out to run on local docker
-      #- "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
+      - "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
       - "--certificatesResolvers.letsencrypt.acme.email=dsevastianov@gmail.com"
       - "--certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--certificatesResolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
@@ -108,15 +108,41 @@ services:
     volumes:
       - letsencrypt:/letsencrypt
 
+  setup:
+    build: ./setup
+    depends_on:
+      - db
+    networks:
+      - internal_network
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+     - |
+        set -ea
+
+        while !(pg_isready -h db -U postgres); do
+          echo "Waiting for postgres server to come online..."
+          sleep "$(( (RANDOM % 3) + 3 ))s"
+        done
+
+        #create mastodon user in Postgres if doesn't exist        
+        psql -h db -U postgres -c "\du" | grep -q mastodon || createuser -h db -U postgres -d mastodon
+        
+        #init mastodon database
+        psql -h db -U postgres -c "\l" | grep -q mastodon || bundle exec rake db:setup
+
+        while true; do
+          sleep 30000h
+        done
+        
+
   web:
     container_name: mastodon-web
     build: .
     restart: always
     env_file: .env.production
-    command: bash -c "rm -f /mastodon/tmp/pids/server.pid; bundle exec rake db:setup; bundle exec rails s -p 3000" #TODO: ew, figure out db setup
-    environment:
-      - WEB_CONCURRENCY=1
-      - MAX_THREADS=5
+    command: bash -c "rm -f /mastodon/tmp/pids/server.pid; bundle exec rails s -p 3000"
     networks:
       - external_network
       - internal_network
@@ -126,7 +152,8 @@ services:
     depends_on:
       - db
       - redis
-      - es
+      # - es
+      - setup
     labels:
       - "traefik.enable=true"      
       - "traefik.http.services.web-https.loadbalancer.server.port=3000"
@@ -150,6 +177,7 @@ services:
       - db
       - redis
       - web
+      - setup
     networks:
       - external_network
       - internal_network
@@ -168,6 +196,7 @@ services:
     depends_on:
       - db
       - redis
+      - setup
     networks:
       - external_network
       - internal_network

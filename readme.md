@@ -16,4 +16,6 @@ For those who wants to have more control, Balena cloud provides an attractive al
    * If you prefer to have your own domain, make sure it's pointing to the IP of your device. Typically you will need to do redirect HTTPS on port 443 in your router to hit your device. 
    * If you're fine with Balena domain name, it will look something like *6c45c13f642b9487a21f159392b33aac.balena-devices.com*
 
-
+---
+## Notes
+1. ElasticSearch container is commented out to match current state of Mastodon repo. Feel free to uncomment and change config accordingly. **ElasticSearch requires `sysctl -w vm.max_map_count=262144` to be executed on the host**

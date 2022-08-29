@@ -1,2 +1,0 @@
-CREATE USER mastodon WITH CREATEDB;
-
