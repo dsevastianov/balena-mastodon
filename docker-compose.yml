@@ -1,10 +1,15 @@
 version: '2.1'
+x-default-environment: &default-environment
+  LOCAL_DOMAIN: 7c45c13f642b2694a21f159392b33aad.balena-devices.com
 volumes:
-  postgres14:
-  mastodon:
-  redis:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
   letsencrypt:
-  elasticsearch:
+  postgres14:
+  redis:
+  mastodon:
+  mastodon_public:
 networks:
   external_network:
   internal_network:
@@ -32,7 +37,7 @@ services:
       test: ['CMD', 'redis-cli', 'ping']
     volumes:
       - redis:/data
- 
+  
   # es:
   #   restart: always
   #   image: elasticsearch:7.17.5
@@ -63,61 +68,16 @@ services:
   #   ports:
   #     - '127.0.0.1:9200:9200'
   #     - '127.0.0.1:9300:9300'
-  
-  traefik:
-    image: traefik:v2.8.1
-    container_name: traefik
-    networks:
-      - external_network
+
+  web:
+    build: .
     restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    command:
-      - "--log.level=INFO"
-      - "--accesslog=true"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      #Point to Balena docker socket, comment out to run on local docker
-      - "--providers.docker.endpoint=unix:///var/run/balena-engine.sock"
-      - "--certificatesResolvers.letsencrypt.acme.email=dsevastianov@gmail.com"
-      - "--certificatesResolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesResolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
-      - "--certificatesResolvers.letsencrypt.acme.httpChallenge.entrypoint=web"
-
-    labels:
-      # So that Traefik can listen to the Docker events
-      - "io.balena.features.balena-socket=1"
-      - "traefik.enable=true"
-
-      # Proxy on Balena cloud strips X-Forward-* headers, adding them in middleware
-      - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Proto=https"
-      - "traefik.http.middlewares.xheaders.headers.customrequestheaders.X-Forwarded-Port=443"
-      # # # HTTPS Redirect
-      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
-      - "traefik.http.routers.http-catchall.entrypoints=web"
-      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https@docker"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      #Cache
-      - "traefik.http.middlewares.test-http-cache.plugin.httpCache.maxTtl=600"
-    depends_on:
-      - web
-      - streaming
-    volumes:
-      - letsencrypt:/letsencrypt
-
-  setup:
-    build: ./setup
-    depends_on:
-      - db
-    networks:
-      - internal_network
+    environment:
+      <<: *default-environment
     entrypoint:
       - /bin/sh
       - -c
-    command:
+    command: 
      - |
         set -ea
 
@@ -131,18 +91,10 @@ services:
         
         #init mastodon database
         psql -h db -U postgres -c "\l" | grep -q mastodon || bundle exec rake db:setup
-
-        while true; do
-          sleep 30000h
-        done
         
-
-  web:
-    container_name: mastodon-web
-    build: .
-    restart: always
-    env_file: .env.production
-    command: bash -c "rm -f /mastodon/tmp/pids/server.pid; bundle exec rails s -p 3000"
+        rm -f /mastodon/tmp/pids/server.pid
+        bundle exec rails s -p 3000
+        
     networks:
       - external_network
       - internal_network
@@ -151,33 +103,38 @@ services:
       test: ['CMD-SHELL', 'wget -q --spider --proxy=off localhost:3000/health || exit 1']
     depends_on:
       - db
-      - redis
-      # - es
-      - setup
-    labels:
-      - "traefik.enable=true"      
-      - "traefik.http.services.web-https.loadbalancer.server.port=3000"
-      - "traefik.http.routers.web-https.rule=Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`)"
-      - "traefik.http.routers.web-https.entrypoints=websecure"
-      - "traefik.http.routers.web-https.tls.certresolver=letsencrypt"
-
-      - "traefik.http.routers.web-http.middlewares=xheaders@docker"  
-      - "traefik.http.routers.web-http.rule=Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`)"
-      - "traefik.http.routers.web-http.entrypoints=web"
+      - redis     
     volumes:
+      - mastodon_public:/mastodon/public
       - mastodon:/mastodon/public/system
+  
+  caddy:
+    build: ./caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - mastodon_public:/srv/mastodon/public
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/logs
+    environment:
+      <<: *default-environment
+      LE_EMAIL: dsevastianov@gmail.com
+    networks:
+      - external_network
+      - internal_network
 
   sidekiq:
     build: .
     image: tootsuite/mastodon
     restart: always
-    env_file: .env.production
+    environment:
+      <<: *default-environment
     command: bundle exec sidekiq
     depends_on:
-      - db
-      - redis
       - web
-      - setup
     networks:
       - external_network
       - internal_network
@@ -191,25 +148,14 @@ services:
     build: .
     image: tootsuite/mastodon
     restart: always
-    env_file: .env.production
+    environment:
+      <<: *default-environment
     command: node ./streaming
     depends_on:
-      - db
-      - redis
-      - setup
+      - web
     networks:
       - external_network
       - internal_network
     healthcheck:
       # prettier-ignore
-      test: ['CMD-SHELL', 'wget -q --spider --proxy=off localhost:4000/api/v1/streaming/health || exit 1']
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.streaming.loadbalancer.server.port=4000"
-      - "traefik.http.routers.streaming-https.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
-      - "traefik.http.routers.streaming-https.entrypoints=websecure"
-      - "traefik.http.routers.streaming-https.tls.certresolver=letsencrypt"
-
-      - "traefik.http.routers.streaming-http.rule=(Host(`7c45c13f642b2694a21f159392b33aad.balena-devices.com`) && PathPrefix(`/api/v1/streaming`))"
-      - "traefik.http.routers.streaming-http.entrypoints=web"
-      - "traefik.http.routers.streaming-http.middlewares=xheaders@docker"  
+      test: ['CMD-SHELL', 'wget -q --spider --proxy=off localhost:4000/api/v1/streaming/health || exit 1']   
