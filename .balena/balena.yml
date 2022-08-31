@@ -1,0 +1,4 @@
+build-secrets:
+    global:
+        - source: .env.production
+          dest: .env.production
