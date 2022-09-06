@@ -19,4 +19,4 @@ foreach($key in $vars.Keys) {
 }
 Set-Content $conf $data
 
-Write-Output "Done generating secrets in ./.balena/secrets/.env.production"
+Write-Output "Done generating secrets in $conf"
