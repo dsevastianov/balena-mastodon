@@ -1,6 +1,6 @@
 version: '2.1'
 x-default-environment: &default-environment
-  LOCAL_DOMAIN: your.domain.com
+  LOCAL_DOMAIN: 7c45c13f642b2694a21f159392b33aad.balena-devices.com
 volumes:
   caddy_data:
   caddy_config:
@@ -91,7 +91,7 @@ services:
         
         #init mastodon database
         psql -h db -U postgres -c "\l" | grep -q mastodon || bundle exec rake db:setup
-        
+
         rm -f /mastodon/tmp/pids/server.pid
         bundle exec rails s -p 3000
         

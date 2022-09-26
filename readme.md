@@ -1,6 +1,6 @@
 # Mastodon On Balena
 
-This is a condensed guide for running Mastodon on Balena. It's limited to the bare minumum required for starting the service on your own device. For more comprehensive walkthrough, please see [here].
+This is a condensed guide for running Mastodon on Balena. It's limited to the bare minumum required for starting the service on your own device. For more comprehensive walkthrough, please see [here](https://www.balena.io/blog/mastodon-on-balena/).
 
 ## Minimum configuration
 
