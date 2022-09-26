@@ -1,6 +1,6 @@
 version: '2.1'
 x-default-environment: &default-environment
-  LOCAL_DOMAIN: 7c45c13f642b2694a21f159392b33aad.balena-devices.com
+  LOCAL_DOMAIN: your.domain.com
 volumes:
   caddy_data:
   caddy_config:
